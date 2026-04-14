@@ -3,7 +3,6 @@ package socket
 
 import (
 	"context"
-	"go-libs/socket"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -40,14 +39,15 @@ func NewSocket(w http.ResponseWriter, r *http.Request, ctx context.Context) (*so
 func Read(socket *socket) {
 	for {
 		select {
-			case req := <- socket.Read
-
+		case req := <-socket.Read:
 		}
 	}
 }
 
 func Write(socket *socket) {
 	for {
-		case req 
+		select {
+		case req := <-socket.Write:
+		}
 	}
 }
