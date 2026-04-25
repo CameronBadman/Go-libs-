@@ -13,15 +13,18 @@ type Data interface {
 }
 
 type node struct {
-	data Data
-	next []*node
-	span []int
+	data   Data
+	levels []level
+}
+
+type level struct {
+	next *node
+	span int
 }
 
 func newNode(data Data, height int) *node {
 	return &node{
-		data: data,
-		next: make([]*node, height),
-		span: make([]int, height),
+		data:   data,
+		levels: make([]level, height),
 	}
 }

@@ -70,21 +70,21 @@ func (sl *Skiplist) insertWithPath(value Data, update []*node, rank []int) {
 		for i := sl.level; i < lvl; i++ {
 			rank[i] = 0
 			update[i] = sl.head
-			sl.head.span[i] = sl.length
+			sl.head.levels[i].span = sl.length
 		}
 		sl.level = lvl
 	}
 
 	node := newNode(value, lvl)
 	for i := 0; i < lvl; i++ {
-		node.next[i] = update[i].next[i]
-		node.span[i] = update[i].span[i] - (rank[0] - rank[i])
-		update[i].next[i] = node
-		update[i].span[i] = (rank[0] - rank[i]) + width
+		node.levels[i].next = update[i].levels[i].next
+		node.levels[i].span = update[i].levels[i].span - (rank[0] - rank[i])
+		update[i].levels[i].next = node
+		update[i].levels[i].span = (rank[0] - rank[i]) + width
 	}
 
 	for i := lvl; i < sl.level; i++ {
-		update[i].span[i] += width
+		update[i].levels[i].span += width
 	}
 
 	sl.length += width
@@ -121,9 +121,9 @@ func (sl *Skiplist) InsertAt(offset int, value Data) error {
 			rank[i] = rank[i+1]
 		}
 
-		for x.next[i] != nil && rank[i]+x.span[i] <= offset {
-			rank[i] += x.span[i]
-			x = x.next[i]
+		for x.levels[i].next != nil && rank[i]+x.levels[i].span <= offset {
+			rank[i] += x.levels[i].span
+			x = x.levels[i].next
 		}
 		update[i] = x
 	}
@@ -155,16 +155,16 @@ func (sl *Skiplist) Search(offset int) (Data, int, bool) {
 	x := sl.head
 
 	for i := sl.level - 1; i >= 0; i-- {
-		for x.next[i] != nil && traversed+x.span[i] <= offset {
-			traversed += x.span[i]
-			x = x.next[i]
+		for x.levels[i].next != nil && traversed+x.levels[i].span <= offset {
+			traversed += x.levels[i].span
+			x = x.levels[i].next
 		}
 	}
 
-	if x.next[0] == nil {
+	if x.levels[0].next == nil {
 		return nil, 0, false
 	}
-	return x.next[0].data, offset - traversed, true
+	return x.levels[0].next.data, offset - traversed, true
 }
 
 // DeleteAt deletes and returns the whole value containing logical offset in
@@ -182,14 +182,14 @@ func (sl *Skiplist) DeleteAt(offset int) (Data, error) {
 	x := sl.head
 
 	for i := sl.level - 1; i >= 0; i-- {
-		for x.next[i] != nil && traversed+x.span[i] <= offset {
-			traversed += x.span[i]
-			x = x.next[i]
+		for x.levels[i].next != nil && traversed+x.levels[i].span <= offset {
+			traversed += x.levels[i].span
+			x = x.levels[i].next
 		}
 		update[i] = x
 	}
 
-	target := update[0].next[0]
+	target := update[0].levels[0].next
 	if target == nil {
 		return nil, errors.New("offset out of range")
 	}
@@ -201,15 +201,15 @@ func (sl *Skiplist) DeleteAt(offset int) (Data, error) {
 func (sl *Skiplist) deleteNode(target *node, update []*node) {
 	width := target.data.Len()
 	for i := 0; i < sl.level; i++ {
-		if update[i].next[i] == target {
-			update[i].span[i] += target.spanAt(i) - width
-			update[i].next[i] = target.nextAt(i)
+		if update[i].levels[i].next == target {
+			update[i].levels[i].span += target.spanAt(i) - width
+			update[i].levels[i].next = target.nextAt(i)
 		} else {
-			update[i].span[i] -= width
+			update[i].levels[i].span -= width
 		}
 	}
 
-	for sl.level > 1 && sl.head.next[sl.level-1] == nil {
+	for sl.level > 1 && sl.head.levels[sl.level-1].next == nil {
 		sl.level--
 	}
 	sl.length -= width
@@ -217,17 +217,17 @@ func (sl *Skiplist) deleteNode(target *node, update []*node) {
 }
 
 func (n *node) nextAt(level int) *node {
-	if n == nil || level < 0 || level >= len(n.next) {
+	if n == nil || level < 0 || level >= len(n.levels) {
 		return nil
 	}
-	return n.next[level]
+	return n.levels[level].next
 }
 
 func (n *node) spanAt(level int) int {
-	if n == nil || level < 0 || level >= len(n.span) {
+	if n == nil || level < 0 || level >= len(n.levels) {
 		return 0
 	}
-	return n.span[level]
+	return n.levels[level].span
 }
 
 func (sl *Skiplist) randomLevel() int {

@@ -34,14 +34,14 @@ func assertInvariants(t *testing.T, sl *Skiplist) {
 	if sl.head == nil {
 		t.Fatal("missing head node")
 	}
-	if len(sl.head.next) != sl.maxLevel {
-		t.Fatalf("head height: expected %d, got %d", sl.maxLevel, len(sl.head.next))
+	if len(sl.head.levels) != sl.maxLevel {
+		t.Fatalf("head height: expected %d, got %d", sl.maxLevel, len(sl.head.levels))
 	}
 
 	afterOffset := map[*node]int{sl.head: 0}
 	count := 0
 	length := 0
-	for x := sl.head.next[0]; x != nil; x = x.next[0] {
+	for x := sl.head.levels[0].next; x != nil; x = x.levels[0].next {
 		if x.data == nil {
 			t.Fatal("data node has nil data")
 		}
@@ -66,11 +66,11 @@ func assertInvariants(t *testing.T, sl *Skiplist) {
 
 	for level := 0; level < sl.level; level++ {
 		for x := sl.head; ; {
-			if level >= len(x.span) {
-				t.Fatalf("node at level %d has span height %d", level, len(x.span))
+			if level >= len(x.levels) {
+				t.Fatalf("node at level %d has height %d", level, len(x.levels))
 			}
 
-			next := x.next[level]
+			next := x.levels[level].next
 			after, ok := afterOffset[x]
 			if !ok {
 				t.Fatalf("level %d references node missing from level 0", level)
@@ -85,8 +85,8 @@ func assertInvariants(t *testing.T, sl *Skiplist) {
 				wantSpan = nextAfter - after
 			}
 
-			if x.span[level] != wantSpan {
-				t.Fatalf("level %d span mismatch: expected %d, got %d", level, wantSpan, x.span[level])
+			if x.levels[level].span != wantSpan {
+				t.Fatalf("level %d span mismatch: expected %d, got %d", level, wantSpan, x.levels[level].span)
 			}
 			if next == nil {
 				break
@@ -96,7 +96,7 @@ func assertInvariants(t *testing.T, sl *Skiplist) {
 	}
 
 	for level := sl.level; level < sl.maxLevel; level++ {
-		if sl.head.next[level] != nil {
+		if sl.head.levels[level].next != nil {
 			t.Fatalf("inactive level %d has head link", level)
 		}
 	}
