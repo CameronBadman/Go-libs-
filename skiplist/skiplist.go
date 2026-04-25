@@ -1,4 +1,10 @@
 // Package skiplist provides a weighted skiplist for offset-based data.
+//
+// Each stored value contributes Data.Len units to the list. Offsets used by
+// InsertAt, Search, At, and DeleteAt are measured in those units rather than in
+// node count. This makes the package suitable for text chunks, byte ranges,
+// token streams, and other structures where callers need O(log n) lookup by a
+// logical position.
 package skiplist
 
 import (
@@ -6,6 +12,11 @@ import (
 	"math/rand"
 )
 
+// Skiplist stores Data values and maintains weighted spans for O(log n)
+// offset-based search, insertion, and deletion.
+//
+// Skiplist is not safe for concurrent use. Synchronize access externally if a
+// list is shared across goroutines.
 type Skiplist struct {
 	head     *node
 	level    int
@@ -14,6 +25,10 @@ type Skiplist struct {
 	maxLevel int
 }
 
+// New returns an empty Skiplist with the given maximum tower height.
+//
+// Higher maxLevel values allow taller skiplist towers for large lists. If
+// maxLevel is less than or equal to zero, New uses 1.
 func New(maxLevel int) *Skiplist {
 	if maxLevel <= 0 {
 		maxLevel = 1
@@ -28,7 +43,10 @@ func New(maxLevel int) *Skiplist {
 	}
 }
 
-// Len returns the total logical length of all values using Data.Len.
+// Len returns the total logical length of all stored values.
+//
+// Len is the sum of Data.Len for every value in the list. Use Count to get the
+// number of stored values.
 func (sl *Skiplist) Len() int {
 	if sl == nil {
 		return 0
@@ -36,7 +54,7 @@ func (sl *Skiplist) Len() int {
 	return sl.length
 }
 
-// Count returns the number of values stored in the skiplist.
+// Count returns the number of values stored in the list.
 func (sl *Skiplist) Count() int {
 	if sl == nil {
 		return 0
@@ -73,8 +91,14 @@ func (sl *Skiplist) insertWithPath(value Data, update []*node, rank []int) {
 	sl.count++
 }
 
-// InsertAt inserts value at logical offset, where offset is in [0, Len()].
-// If offset falls inside an existing value, value is inserted before that item.
+// InsertAt inserts value at logical offset.
+//
+// The offset must be in the range [0, Len()]. If offset falls inside an
+// existing value, InsertAt inserts value before that existing value. Splitting
+// values at inner offsets is the caller's responsibility.
+//
+// InsertAt returns an error if value is nil, value.Len() is not positive, or
+// offset is out of range.
 func (sl *Skiplist) InsertAt(offset int, value Data) error {
 	if value == nil {
 		return errors.New("cannot insert nil value")
@@ -109,12 +133,19 @@ func (sl *Skiplist) InsertAt(offset int, value Data) error {
 }
 
 // At returns the value containing logical offset in O(log n).
+//
+// At is a convenience wrapper around Search that discards the inner offset.
 func (sl *Skiplist) At(offset int) (Data, bool) {
 	data, _, ok := sl.Search(offset)
 	return data, ok
 }
 
-// Search returns the value containing logical offset and the offset within that value.
+// Search returns the value containing logical offset and the offset within that
+// value.
+//
+// For example, if the list contains values with lengths [5, 3] then Search(6)
+// returns the second value with inner offset 1. Search returns ok=false if
+// offset is outside [0, Len()).
 func (sl *Skiplist) Search(offset int) (Data, int, bool) {
 	if offset < 0 || offset >= sl.length {
 		return nil, 0, false
@@ -136,7 +167,11 @@ func (sl *Skiplist) Search(offset int) (Data, int, bool) {
 	return x.next[0].data, offset - traversed, true
 }
 
-// DeleteAt deletes the value containing logical offset in O(log n).
+// DeleteAt deletes and returns the whole value containing logical offset in
+// O(log n).
+//
+// DeleteAt does not split values. If offset falls inside a value, the entire
+// value is removed. DeleteAt returns an error if offset is outside [0, Len()).
 func (sl *Skiplist) DeleteAt(offset int) (Data, error) {
 	if offset < 0 || offset >= sl.length {
 		return nil, errors.New("offset out of range")
