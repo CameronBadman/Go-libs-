@@ -1,2 +1,0 @@
-// cogntio middleware
-package cogntio
