@@ -19,6 +19,89 @@ type weightedData struct {
 
 func (d weightedData) Len() int { return d.width }
 
+func assertInvariants(t *testing.T, sl *Skiplist) {
+	t.Helper()
+
+	if sl == nil {
+		return
+	}
+	if sl.maxLevel <= 0 {
+		t.Fatalf("maxLevel must be positive, got %d", sl.maxLevel)
+	}
+	if sl.level < 1 || sl.level > sl.maxLevel {
+		t.Fatalf("level %d out of range [1,%d]", sl.level, sl.maxLevel)
+	}
+	if sl.head == nil {
+		t.Fatal("missing head node")
+	}
+	if len(sl.head.next) != sl.maxLevel {
+		t.Fatalf("head height: expected %d, got %d", sl.maxLevel, len(sl.head.next))
+	}
+
+	afterOffset := map[*node]int{sl.head: 0}
+	count := 0
+	length := 0
+	for x := sl.head.next[0]; x != nil; x = x.next[0] {
+		if x.data == nil {
+			t.Fatal("data node has nil data")
+		}
+		width := x.data.Len()
+		if width <= 0 {
+			t.Fatalf("data node has non-positive length %d", width)
+		}
+		count++
+		length += width
+		afterOffset[x] = length
+	}
+
+	if length != sl.length {
+		t.Fatalf("stored length mismatch: expected %d, got %d", length, sl.length)
+	}
+	if count != sl.count {
+		t.Fatalf("stored count mismatch: expected %d, got %d", count, sl.count)
+	}
+	if count == 0 && sl.level != 1 {
+		t.Fatalf("empty list should have level 1, got %d", sl.level)
+	}
+
+	for level := 0; level < sl.level; level++ {
+		for x := sl.head; ; {
+			if level >= len(x.span) {
+				t.Fatalf("node at level %d has span height %d", level, len(x.span))
+			}
+
+			next := x.next[level]
+			after, ok := afterOffset[x]
+			if !ok {
+				t.Fatalf("level %d references node missing from level 0", level)
+			}
+
+			wantSpan := sl.length - after
+			if next != nil {
+				nextAfter, ok := afterOffset[next]
+				if !ok {
+					t.Fatalf("level %d references node missing from level 0", level)
+				}
+				wantSpan = nextAfter - after
+			}
+
+			if x.span[level] != wantSpan {
+				t.Fatalf("level %d span mismatch: expected %d, got %d", level, wantSpan, x.span[level])
+			}
+			if next == nil {
+				break
+			}
+			x = next
+		}
+	}
+
+	for level := sl.level; level < sl.maxLevel; level++ {
+		if sl.head.next[level] != nil {
+			t.Fatalf("inactive level %d has head link", level)
+		}
+	}
+}
+
 func mustAt(t *testing.T, sl *Skiplist, offset int) intData {
 	t.Helper()
 	v, ok := sl.At(offset)
@@ -39,6 +122,7 @@ func snapshot(t *testing.T, sl *Skiplist) []intData {
 
 func assertState(t *testing.T, sl *Skiplist, want []intData) {
 	t.Helper()
+	assertInvariants(t, sl)
 	if sl.Len() != len(want) {
 		t.Fatalf("expected len %d, got %d", len(want), sl.Len())
 	}
@@ -90,6 +174,7 @@ func TestWeightedOffsets(t *testing.T) {
 		if err := sl.InsertAt(sl.Len(), item); err != nil {
 			t.Fatalf("insert failed: %v", err)
 		}
+		assertInvariants(t, sl)
 	}
 
 	if sl.Len() != 9 {
@@ -132,6 +217,7 @@ func TestWeightedOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete at weighted offset failed: %v", err)
 	}
+	assertInvariants(t, sl)
 	if deleted.(weightedData).value != 20 {
 		t.Fatalf("expected deleted value 20, got %d", deleted.(weightedData).value)
 	}
@@ -151,8 +237,80 @@ func TestWeightedOffsets(t *testing.T) {
 	}
 }
 
+func TestRandomWeightedOffsetOpsAgainstModel(t *testing.T) {
+	sl := New(16)
+	model := make([]weightedData, 0)
+	rng := rand.New(rand.NewSource(99))
+
+	for step := 0; step < 1000; step++ {
+		doInsert := len(model) == 0 || rng.Intn(100) < 70
+		if doInsert {
+			offset := rng.Intn(totalWeightedLen(model) + 1)
+			item := weightedData{
+				value: step,
+				width: rng.Intn(8) + 1,
+			}
+			if err := sl.InsertAt(offset, item); err != nil {
+				t.Fatalf("step %d: InsertAt(%d, %+v) failed: %v", step, offset, item, err)
+			}
+			idx := insertIndexForOffset(model, offset)
+			model = append(model, weightedData{})
+			copy(model[idx+1:], model[idx:])
+			model[idx] = item
+		} else {
+			offset := rng.Intn(totalWeightedLen(model))
+			idx, _, ok := weightedIndexForOffset(model, offset)
+			if !ok {
+				t.Fatalf("step %d: model missing offset %d", step, offset)
+			}
+			deleted, err := sl.DeleteAt(offset)
+			if err != nil {
+				t.Fatalf("step %d: DeleteAt(%d) failed: %v", step, offset, err)
+			}
+			if deleted.(weightedData) != model[idx] {
+				t.Fatalf("step %d: DeleteAt(%d) expected %+v got %+v", step, offset, model[idx], deleted)
+			}
+			model = append(model[:idx], model[idx+1:]...)
+		}
+
+		assertWeightedState(t, sl, model)
+	}
+}
+
+func TestMaxLevelEdges(t *testing.T) {
+	for _, maxLevel := range []int{-3, 0, 1, 2, 64} {
+		t.Run(strconv.Itoa(maxLevel), func(t *testing.T) {
+			sl := New(maxLevel)
+			assertInvariants(t, sl)
+
+			if err := sl.InsertAt(0, weightedData{value: 1, width: 3}); err != nil {
+				t.Fatalf("insert first failed: %v", err)
+			}
+			if err := sl.InsertAt(sl.Len(), weightedData{value: 2, width: 5}); err != nil {
+				t.Fatalf("insert second failed: %v", err)
+			}
+			assertWeightedState(t, sl, []weightedData{
+				{value: 1, width: 3},
+				{value: 2, width: 5},
+			})
+
+			if _, err := sl.DeleteAt(0); err != nil {
+				t.Fatalf("delete first failed: %v", err)
+			}
+			if _, err := sl.DeleteAt(sl.Len() - 1); err != nil {
+				t.Fatalf("delete second failed: %v", err)
+			}
+			assertInvariants(t, sl)
+			if sl.Len() != 0 || sl.Count() != 0 {
+				t.Fatalf("expected empty list, got len=%d count=%d", sl.Len(), sl.Count())
+			}
+		})
+	}
+}
+
 func TestOffsetBounds(t *testing.T) {
 	sl := New(6)
+	assertInvariants(t, sl)
 
 	if _, ok := sl.At(0); ok {
 		t.Fatal("expected At(0) on empty list to fail")
@@ -170,6 +328,7 @@ func TestOffsetBounds(t *testing.T) {
 	if err := sl.InsertAt(0, intData(42)); err != nil {
 		t.Fatalf("insert at 0 failed: %v", err)
 	}
+	assertInvariants(t, sl)
 	if _, ok := sl.At(-1); ok {
 		t.Fatal("expected At(-1) to fail")
 	}
@@ -239,6 +398,7 @@ func TestMassivePointLoadAndAccess(t *testing.T) {
 	if sl.Len() != n {
 		t.Fatalf("expected len %d, got %d", n, sl.Len())
 	}
+	assertInvariants(t, sl)
 
 	checkpoints := []int{0, n / 4, n / 2, (3 * n) / 4, n - 1}
 	for _, idx := range checkpoints {
@@ -291,4 +451,65 @@ func TestMassivePointLoadAndAccess(t *testing.T) {
 	if sl.Len() != expectedLen {
 		t.Fatalf("expected len after deletes %d, got %d", expectedLen, sl.Len())
 	}
+	assertInvariants(t, sl)
+}
+
+func assertWeightedState(t *testing.T, sl *Skiplist, want []weightedData) {
+	t.Helper()
+	assertInvariants(t, sl)
+
+	if sl.Count() != len(want) {
+		t.Fatalf("expected count %d, got %d", len(want), sl.Count())
+	}
+	if sl.Len() != totalWeightedLen(want) {
+		t.Fatalf("expected len %d, got %d", totalWeightedLen(want), sl.Len())
+	}
+
+	for offset := 0; offset < sl.Len(); offset++ {
+		idx, inner, ok := weightedIndexForOffset(want, offset)
+		if !ok {
+			t.Fatalf("model missing offset %d", offset)
+		}
+		got, gotInner, ok := sl.Search(offset)
+		if !ok {
+			t.Fatalf("skiplist missing offset %d", offset)
+		}
+		if got.(weightedData) != want[idx] {
+			t.Fatalf("offset %d: expected %+v, got %+v", offset, want[idx], got)
+		}
+		if gotInner != inner {
+			t.Fatalf("offset %d: expected inner offset %d, got %d", offset, inner, gotInner)
+		}
+	}
+}
+
+func totalWeightedLen(items []weightedData) int {
+	total := 0
+	for _, item := range items {
+		total += item.Len()
+	}
+	return total
+}
+
+func insertIndexForOffset(items []weightedData, offset int) int {
+	traversed := 0
+	for i, item := range items {
+		traversed += item.Len()
+		if traversed > offset {
+			return i
+		}
+	}
+	return len(items)
+}
+
+func weightedIndexForOffset(items []weightedData, offset int) (int, int, bool) {
+	traversed := 0
+	for i, item := range items {
+		next := traversed + item.Len()
+		if offset < next {
+			return i, offset - traversed, true
+		}
+		traversed = next
+	}
+	return 0, 0, false
 }
