@@ -1,26 +1,19 @@
 package skiplist
 
 type Data interface {
-	len() int
+	Len() int
 }
 
-type Node struct {
+type node struct {
 	data Data
-	next []*Node
+	next []*node
 	span []int
 }
 
-func NewNode(data Data, height int) *Node {
-	return &Node{
+func newNode(data Data, height int) *node {
+	return &node{
 		data: data,
-		next: make([]*Node, height),
+		next: make([]*node, height),
 		span: make([]int, height),
 	}
-}
-
-func (n *Node) height() int {
-	if n == nil {
-		return 0
-	}
-	return len(n.next)
 }
